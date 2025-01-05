@@ -1,20 +1,43 @@
 ################################################################################
-# functions
+# dbg "text to say"
+#
+# debug printer. silence unless DEBUG is set
 ################################################################################
+dbg()   { if [[ -n "${DEBUG:-}" ]]; then 1>&2 printf 'DEBUG: %s\n' "$*"; fi; }
 
-
+################################################################################
+# has <command>
+#
+# tests if <command> exists 
+################################################################################
 has() { type "$1" &> /dev/null ; } 
 
-# trash [file(s)...]
+################################################################################
+# is-url <url>
+#
+# tests if <url> exists 
+################################################################################
+is-url() {
+  regex='(https?|ftp|file)://[-[:alnum:]\+&@#/%?=~_|!:,.;]*[-[:alnum:]\+&@#/%=~_|]'
+  [[ $1 =~ $regex ]]
+}
+
+################################################################################
+# trash <file/dir>'s
+#
+# Move <file/dir>'s to $HOME/Trash
+################################################################################
 trash() {
   local trash_dir="$HOME/Trash"
   mkdir -p "$trash_dir" && mv -b -t "$trash_dir" -- "$@"
 }
 
+################################################################################
 # find-up [file]
 #
 # test existence of [file], traversing up from CWD.
 # on match print path and return, else return 1.
+################################################################################
 find-up() {
   local file="${1:-.git}"
 
@@ -29,158 +52,290 @@ find-up() {
   return 1
 }
 
+################################################################################
+# print if using uefi or bios
+################################################################################
 uefi-or-bios() {
   [ -d /sys/firmware/efi ] && echo 'UEFI' || echo 'Legacy BIOS/CSM'
 }
 
-#du -hax "${1:-/}" 2> /dev/null | sort -nr | head -n 30
+################################################################################
+# a poor mans `duh`: prints directories using the most space
+################################################################################
 disk-space() {
+  #du -hax "${1:-/}" 2> /dev/null | sort -nr | head -n 30
   printf "Checking %s...\n" "$(realpath -s "${1:-.}")"
   (cd "${1:-.}" && du -Lhsx ./* 2> /dev/null | sort -rh | head -20)
 }
 
-# password-generate [length]
+################################################################################
+# passgen [length]
 #
 # generate password 
+################################################################################
 passgen() { tr -dc "a-zA-Z0-9\!%^&;:" < /dev/urandom | fold -w "${1:-16}" | head -n 1; }
 
-is-url() {
-  regex='(https?|ftp|file)://[-[:alnum:]\+&@#/%?=~_|!:,.;]*[-[:alnum:]\+&@#/%=~_|]'
-  [[ $1 =~ $regex ]]
+################################################################################
+# ytmp3 <url>
+#
+# Convert youtube link to an mp3 in the CWD
+################################################################################
+ytmp3() {
+  url="${1:-}"
+  if [[ -z "$url" ]]; then
+    echo "Usage: ytmp3 <youtubeurl>"
+    echo ""
+    echo "convert youtube video to mp3"
+    return 1
+  fi
+
+  yt-dlp \
+    --extract-audio \
+    --audio-format "mp3" \
+    --restrict-filenames \
+    --output "%(title)s.%(ext)s" \
+    "$url"
 }
 
-man-url() {
-  if [[ -n "${1:-}" ]] && is-url "${1:-}"; then
-    /usr/bin/man <(curl -s "${1:-}")
+################################################################################
+# ytwav <url>
+#
+# Convert youtube link to a wav in the CWD
+################################################################################
+ytwav() {
+  url="${1:-}"
+  if [[ -z "$url" ]]; then
+    echo "Usage: ytwav <youtubeurl>"
+    echo ""
+    echo "convert youtube video to wav"
+    return 1
+  fi
+
+  yt-dlp \
+    --extract-audio \
+    --audio-format "wav" \
+    --restrict-filenames \
+    --output "%(title)s.%(ext)s" \
+    "$url"
+}
+
+################################################################################
+# Create a symlink
+# Arguments:
+#   src
+#   dest
+# Returns:
+#   1 on bad input
+################################################################################
+symlink() {
+  local src dest backup
+
+  src="${1:-}"
+  dest="${2:-}"
+  [[ -n "$src" && -n "$dest" ]] || return 1
+
+  # convert paths to absolute
+  src="$(realpath -sm "$src")"
+  dest="$(realpath -sm "$dest")"
+
+  if [[ -f "$dest" && ! -h "$dest" ]]; then
+    # destination exists and isn't a link; rename it.
+    backup="$(dirname "$dest")/$(basename "$dest").$(date '+%s')"
+    info "Renaming file $dest -> $backup"
+    mv -f "$dest" "$backup"
+  elif [[ ! -e "$dest" ]]; then
+    # destination exists and is a broken symlink; remove it.
+    dbg "$dest exists and is broken"
+    rm -f "$dest"
   else
-    /usr/bin/man "$@"
+    dbg "do nothing for $dest"
+  fi
+
+  # if the link doesn't exist, create it
+  if [[ ! -h "$dest" ]]; then
+    dbg "Symlinking $src -> $dest"
+    mkdir -vp "$(dirname "$dest")"
+    ln -bsf "$src" "$dest"
   fi
 }
 
 ################################################################################
-# supreme mathematics
+# gitclone <url> [base directory]
+#
+# Outputs:
+#   Absolute path of cloned directory on success
+# Returns:
+#   1 on error
+#
+# Clone to `~/.local/src/dotfiles`: gitclone https://github.com/kmmiles/dotfiles
+# Clone to `/dotfiles`: gitclone https://github.com/kmmiles/dotfiles /
 ################################################################################
-declare -A supreme_titles=(
-    [1]="Knowledge"
-    [2]="Wisdom"
-    [3]="Understanding"
-    [4]="Culture/Freedom"
-    [5]="Power/Refinement"
-    [6]="Equality"
-    [7]="God"
-    [8]="Build/Destroy"
-    [9]="Born"
-    [10]="Cipher"
-    [11]="Knowledge Knowledge"
-    [12]="Knowledge Wisdom"
-    [13]="Knowledge Understanding"
-    [14]="Knowledge Culture/Freedom"
-    [15]="Knowledge Power/Refinement"
-    [16]="Knowledge Equality"
-    [17]="Knowledge God"
-    [18]="Knowledge Build/Destroy"
-    [19]="Knowledge Born"
-    [20]="Knowledge Cipher"
-    [21]="Wisdom Knowledge"
-    [22]="Wisdom Wisdom"
-    [23]="Wisdom Understanding"
-    [24]="Wisdom Culture/Freedom"
-    [25]="Wisdom Power/Refinement"
-    [26]="Wisdom Equality"
-    [27]="Wisdom God"
-    [28]="Wisdom Build/Destroy"
-    [29]="Wisdom Born"
-    [30]="Wisdom Cipher"
-    [31]="Understanding Knowledge"
-)
+gitclone() {
+  local repo_url base_dir dest_dir
 
-declare -A supreme_descriptions=(
-    [1]="Represents awareness, learning, and perception."
-    [2]="Symbolizes the manifestation of knowledge, applied wisdom, and insight."
-    [3]="Reflects clear perception, comprehension, and mental clarity."
-    [4]="Encompasses one's way of life and the pursuit of freedom."
-    [5]="Signifies strength, refinement of character, and purity."
-    [6]="Represents balance, fairness, and harmony in relationships."
-    [7]="Acknowledges the divine presence within self."
-    [8]="The process of creation and elimination of negativity."
-    [9]="The completion and realization of potential."
-    [10]="Signifies a cycle, circle, or state of wholeness."
-    [11]="Further awareness, learning, and perception."
-    [12]="The combined effort of learning and wise application."
-    [13]="Awareness leading to clear comprehension."
-    [14]="Awareness integrated into one's way of life."
-    [15]="Awareness shaping strength and purity."
-    [16]="Awareness fostering balance and fairness."
-    [17]="Awareness of the divine presence within self."
-    [18]="Awareness aiding the creation of positivity and removal of negativity."
-    [19]="Awareness leading to the realization of potential."
-    [20]="Awareness in the state of wholeness."
-    [21]="Application of learned knowledge."
-    [22]="Further application of wisdom and insight."
-    [23]="Insight leading to clear comprehension."
-    [24]="Wise application integrated into one's way of life."
-    [25]="Insight shaping strength and purity."
-    [26]="Wise application fostering balance and fairness."
-    [27]="Wise recognition of the divine presence within self."
-    [28]="Insight aiding the creation of positivity and removal of negativity."
-    [29]="Wise application leading to the realization of potential."
-    [30]="Insight in the state of wholeness."
-    [31]="Clear comprehension enhancing awareness."
-)
+  repo_url="${1:-}"
+  [[ -n "$repo_url" ]] || return 1
 
-declare -A supreme_explanations=(
-    [1]="The foundation of everything in existence. It allows us to understand the world around us. By seeking it, we empower ourselves to make informed decisions and grow intellectually."
-    [2]="The application of knowledge in practical ways. It symbolizes insight and the ability to use our understanding to make sound judgments. It is gained through experience and reflection."
-    [3]="The ability to comprehend and internalize knowledge and wisdom. It allows us to see the connections between different pieces of information and to grasp the deeper meaning behind them."
-    [4]="One's way of life and the pursuit of freedom. It encompasses the customs, beliefs, and practices that define a community or individual. By embracing it, we establish our identity and strive for the freedom to express ourselves authentically."
-    [5]="Strength and the refinement of character. It represents the capacity to influence and effect change while maintaining purity and integrity. It is not just physical strength but also mental and moral fortitude."
-    [6]="Balance, fairness, and harmony in relationships. It emphasizes the importance of treating others with respect and ensuring that everyone has equal opportunities and rights. It is essential for building just and cohesive communities."
-    [7]="The divine presence within oneself. It represents the recognition of the higher self and the potential for greatness that exists within every individual. By understanding it, we connect with our true purpose and potential."
-    [8]="The process of creation and elimination of negativity. It signifies the ongoing cycle of growth and transformation, where we build positive aspects of our lives and dismantle what no longer serves us. This principle encourages continuous improvement and renewal."
-    [9]="The completion and realization of potential. It signifies the process of bringing ideas, dreams, and goals to fruition. Through effort and perseverance, we give birth to new realities and accomplishments."
-    [10]="A cycle, circle, or state of wholeness. It represents the infinite nature of the universe and the interconnectedness of all things. It reminds us of the continuous cycles of life, death, and rebirth."
-    [11]="Further emphasizes the importance of awareness, learning, and perception. It encourages the pursuit of knowledge for its own sake and the continuous expansion of one's understanding."
-    [12]="The combined effort of learning and wise application. It highlights the importance of using our knowledge to make informed and intelligent decisions."
-    [13]="Emphasizes awareness leading to clear comprehension. It encourages us to seek knowledge not just for information but for deeper understanding and insight."
-    [14]="Integrates awareness into one's way of life. It emphasizes the importance of applying our knowledge to enrich our cultural practices and to strive for personal and collective freedom."
-    [15]="Highlights the role of awareness in shaping strength and purity. It encourages us to use our knowledge to refine our character and to build our inner and outer strength."
-    [16]="Fosters awareness that promotes balance and fairness. It emphasizes the need to understand and address issues of inequality and to work towards creating a just and harmonious society."
-    [17]="Emphasizes awareness of the divine presence within oneself. It encourages us to recognize our higher potential and to connect with our true purpose."
-    [18]="Highlights the role of awareness in the creation of positivity and the removal of negativity. It encourages us to use our knowledge to build positive aspects of our lives and to dismantle what no longer serves us."
-    [19]="Represents awareness leading to the realization of potential. It emphasizes the importance of using our knowledge to bring our ideas and goals to fruition."
-    [20]="Signifies awareness in the state of wholeness. It reminds us of the interconnectedness of all things and the continuous cycles of life, death, and rebirth."
-    [21]="Represents the practical application of learned knowledge. It emphasizes the importance of using our wisdom to make informed decisions and to navigate life's challenges."
-    [22]="Further emphasizes the application of wisdom and insight. It encourages continuous reflection and the refinement of our judgment and decision-making skills."
-    [23]="Highlights the role of insight in leading to clear comprehension. It encourages us to use our wisdom to gain a deeper understanding of the world and ourselves."
-    [24]="Integrates wise application into one's way of life. It emphasizes the importance of using our wisdom to enrich our cultural practices and to strive for personal and collective freedom."
-    [25]="Highlights the role of insight in shaping strength and purity. It encourages us to use our wisdom to refine our character and to build our inner and outer strength."
-    [26]="Fosters wise application that promotes balance and fairness. It emphasizes the need to use our wisdom to address issues of inequality and to work towards creating a just and harmonious society."
-    [27]="Emphasizes wise recognition of the divine presence within oneself. It encourages us to recognize our higher potential and to connect with our true purpose."
-    [28]="Highlights the role of insight in aiding the creation of positivity and the removal of negativity. It encourages us to use our wisdom to build positive aspects of our lives and to dismantle what no longer serves us."
-    [29]="Represents wise application leading to the realization of potential. It emphasizes the importance of using our wisdom to bring our ideas and goals to fruition."
-    [30]="Signifies insight in the state of wholeness. It reminds us of the interconnectedness of all things and the continuous cycles of life, death, and rebirth."
-    [31]="Represents clear comprehension that enhances awareness. It encourages us to seek a deeper understanding of the world and to use that understanding to expand our knowledge."
-)
+  base_dir="${2:-}"
+  if [[ -z "$base_dir" ]]; then
+    base_dir="${LOCAL_SRC_DIR:-}"
+  fi
+  [[ -n "$base_dir" ]] || return 1
 
-todays-math() {
-    # Colors
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    BLUE='\033[0;34m'
-    YELLOW='\033[0;33m'
-    CYAN='\033[0;36m'
-    NC='\033[0m' # No Color
-
-    # Get today's date
-    day=$(date +%d | sed 's/^0*//') # Remove leading zero
-
-    echo -e "${CYAN}${supreme_titles[$day]}: ${supreme_descriptions[$day]}${NC}"
-    echo -e "${supreme_explanations[$day]}"
+  dest_dir="$base_dir/$(basename "$repo_url" .git)"
+  if [[ -d "$dest_dir/.git" ]]; then
+    # repo already exists, just print the path.
+    printf '%s\n' "$(realpath -sm "$dest_dir")"
+  elif [[ ! -d "$dest_dir" ]]; then
+    # repo doesn't exist, clone it and print path.
+    mkdir -p "$base_dir" && \
+      git clone --depth 1 "$repo_url" "$dest_dir"
+      printf '%s\n' "$(realpath -sm "$dest_dir")"
+  fi
 }
 
 ################################################################################
-# generic environment stuff
+# download <url>
+#
+# Outputs:
+#   Absolute path of downloaded file on success
+# Returns:
+#   1 on error
 ################################################################################
+download() {
+  local url filename filepath
+
+  url="${1:-}"
+  [[ -n "$url" ]] || return 1
+
+  filename="$(basename "$url")"
+  [[ -n "$filename" ]] || return 1
+
+  filepath="$DOWNLOAD_DIR/$filename"
+  if [[ ! -f "$filepath" ]]; then
+    mkdir -p "$DOWNLOAD_DIR"
+    curl -fL -o "$filepath" "$url" || return 1
+  fi
+
+  printf '%s\n' "$filepath"
+}
+
+################################################################################
+# install-nord-theme
+#
+# installs the nord theme for vim/tmux/etc
+################################################################################
+install-nord-theme() {
+  symlink "$(gitclone "${urls[nord-dircolors]}")/src/dir_colors" "$HOME/.dir_colors" 
+  symlink "$(gitclone "${urls[nord-tmux]}")/nord.tmux" "$HOME/.tmux/nord.tmux" 
+  symlink "$(gitclone "${urls[nord-vim]}")/colors/nord.vim" "$HOME/.vim/colors/nord.vim" 
+}
+
+################################################################################
+# install-vimrc
+#
+# creates ~/.vimrc and nvim wrapper if they doesn't exist
+################################################################################
+install-vimrc() {
+
+  if has "nvim" && [[ ! -f "~/.config/nvim/init.vim" ]]; then
+    mkdir -p ~/.config/nvim
+    cat <<EOF > "$HOME/.config/nvim/init.vim"
+set runtimepath^=~/.vim runtimepath+=~/.vim/after
+let &packpath=&runtimepath
+source ~/.vimrc
+EOF
+  fi
+
+  # if there's already a vimrc, just return
+  [[ -f "$HOME"/.vimrc ]] && return 0
+
+  cat <<EOF > "$HOME/.vimrc"
+let g:is_bash = 1
+set visualbell
+set termguicolors
+
+syntax enable
+set laststatus=2
+set tabstop=4
+set softtabstop=2
+set shiftwidth=2
+set expandtab
+set backspace=2
+set modeline
+set clipboard=unnamedplus
+"set spell spelllang=en_us
+
+"  autocmd vimenter * ++nested colorscheme gruvbox
+if has('nvim')
+  colorscheme nord
+else
+  colorscheme elflord
+endif
+
+" In ~/.vim/vimrc, or somewhere similar.
+let g:ale_linters = {
+\   'markdown': [],
+\}
+EOF
+}
+
+################################################################################
+# provision-ubuntu
+#
+# install the bare minimum system packages for ubuntu/debian
+################################################################################
+provision-ubuntu() {
+  sudo bash <<EOF
+  apt-get update -y
+  apt-get upgrade -y
+  apt-get install --no-install-recommends -y \
+    ca-certificates \
+    build-essential \
+    automake \
+    pkg-config \
+    yacc \
+    bash \
+    zsh \
+    procps \
+    git \
+    curl \
+    unzip \
+    bc \
+    python3 \
+    python3-pip \
+    tmux \
+    shellcheck \
+    shfmt
+EOF
+}
+
+################################################################################
+################################################################################
+################################################################################
+# END OF FUNCTIONS. ENVIRONMENT POLLUTION BEGINS NOW
+################################################################################
+################################################################################
+################################################################################
+
+# all urls used by functions and stuff, stored in an associative array
+#
+# access it like `echo ${urls[something]}`
+declare -A urls
+urls[dotfiles]="https://github.com/kmmiles/dotfiles.git"
+urls[zsh-syntax-highlighting]="https://github.com/zsh-users/zsh-syntax-highlighting"
+urls[zsh-autosuggestions]="https://github.com/zsh-users/zsh-autosuggestions"
+urls[zsh-history-substring-search]="https://github.com/zsh-users/zsh-history-substring-search"
+urls[zsh-completions]="https://github.com/zsh-users/zsh-completions"
+urls[nord-dircolors]="https://github.com/arcticicestudio/nord-dircolors"
+urls[nord-tmux]="https://github.com/arcticicestudio/nord-tmux"
+urls[nord-vim]="https://github.com/arcticicestudio/nord-vim"
+urls[odin]="https://github.com/Tetralux/odin.vim"
+urls[ale]="https://github.com/dense-analysis/ale.git"
+urls[vim-go]="https://github.com/fatih/vim-go.git"
+urls[tpm]="https://github.com/tmux-plugins/tpm"
+urls[youtube-dl]="https://yt-dl.org/downloads/latest/youtube-dl"
+urls[prettyping]="https://raw.githubusercontent.com/denilsonsa/prettyping/master/prettyping"
 
 # history
 HISTCONTROL=ignoredups:erasedups
@@ -194,29 +349,7 @@ GIT_EDITOR=vim
 VISUAL=vim
 EDITOR=vim
 export GIT_EDITOR VISUAL EDITOR
-
-# PATH's
-GOPATH="$HOME"/.local/go
-PONYPATH="$HOME"/.local/share/ponyup
-EMACSPATH="$HOME"/.emacs.d
-FLUTTERPATH="$HOME"/.local/flutter
-DENO_INSTALL="$HOME/.deno"
-NIMPATH="$HOME/.nimble"
-CARGOPATH="$HOME/.cargo"
-BUN_INSTALL="$HOME/.bun"
-RTXPATH="$HOME/.local/share/rtx"
-PNPM_HOME="$HOME/.local/share/pnpm"
-export GOPATH PONYPATH EMACSPATH FLUTTERPATH DENO_INSTALL NIMPATH CARGOPATH BUN_INSTALL RTXPATH PNPM_HOME
-
-X="$HOME/.local/bin:$GOPATH/bin:$EMACSPATH/bin:$FLUTTERPATH/bin:$PNPM_HOME"
-X="$X:$CARGOPATH/bin:$BUN_INSTALL/bin:$PONYPATH/bin:$DENO_INSTALL/bin:$NIMPATH/bin:$RTXPATH/bin"
-PATH="$X:$PATH"
-export PATH
-
-# source environments
-if [[ -f "$HOME"/.cargo/env ]]; then
-  source "$HOME"/.cargo/env
-fi
+#export GNUTERM="sixelgd size 1280,360 font arial 10"
 
 # colors
 export COLORTERM=truecolor
@@ -228,25 +361,28 @@ export LESS_TERMCAP_so=$'\e[01;33m'
 export LESS_TERMCAP_ue=$'\e[0m'
 export LESS_TERMCAP_us=$'\e[1;4;31m'
 
-#export GNUTERM="sixelgd size 1280,360 font arial 10"
-################################################################################
-# activate rtx
-################################################################################
-if command -v "rtx" > /dev/null 2>&1; then
-  eval "$(rtx activate)"
-  eval "$(rtx hook-env)"
-fi
+# define some paths
+DOWNLOAD_DIR="$HOME/Downloads"
+LOCAL_DIR="$HOME/.local"
+LOCAL_BIN_DIR="$LOCAL_DIR/bin"
+LOCAL_SRC_DIR="$LOCAL_DIR/src"
+export DOWNLOAD_DIR LOCAL_DIR LOCAL_BIN_DIR LOCAL_SRC_DIR
 
-################################################################################
+GOPATH="$HOME"/.local/go
+CARGOPATH="$HOME/.cargo"
+export GOPATH CARGOPATH
+
+# PATH
+PATH="$PATH:$LOCAL_BIN_DIR:$GOPATH:$CARGOPATH"
+export PATH
+
 # create aliases based on the installed tools
-################################################################################
 if has exa; then 
   alias ls='exa --octal-permissions --color=always -g --icons --git --sort new'
 else
   alias ls='ls --color'
 fi
 
-#has fnm         &&  eval "$(fnm env)" 
 has prettyping  &&  alias ping='prettyping --nolegend'
 has htop        &&  alias top='htop'
 has btm         &&  alias btm='btm --battery --color nord'
@@ -257,7 +393,6 @@ has less        &&  alias less='less -R'
 has apt-file    &&  alias whathas='apt-file search'
 has dpkg        &&  alias apt-provides='dpkg -S'
 has tmux        &&  alias mux='tmux new -A -s km'
-#has man         &&  alias man='man-url'
 has ls          &&  alias lsd='ls -ld'
 has stat        &&  alias stat-fs='stat -fc "%T"'
 has glow        &&  alias glow='glow -p'
@@ -272,3 +407,7 @@ has rsync       &&  alias rscp='rsync -avuP'
 has bat         &&  alias bat='bat --theme Nord'
 has bat         &&  export MANPAGER="sh -c 'col -bx | bat --theme Nord -l man -p'"
 has highlight   &&  alias dog='highlight -O ansi'
+
+# source external environment profiles
+[[ -f "$CARGOPATH"/env ]] && source "$CARGOPATH"/env
+has fnm && eval "$(fnm env)" 
