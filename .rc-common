@@ -221,6 +221,34 @@ download() {
 }
 
 ################################################################################
+# tex2pdf <texfile>
+#
+# export a pdf from <texfile> 
+################################################################################
+tex2pdf() {
+  local INPUT="${1:-}"
+  if [[ -z "$INPUT" ]]; then
+    echo "Usage: $0 <TEXFILE>"
+    echo ""
+    echo "Convert .tex to .pdf"
+    return 1
+  fi
+
+  if [[ ! -f "$INPUT" ]]; then
+    echo "No such file: $INPUT"
+    return 1
+  fi
+
+  local TEMPDIR="$(mktemp -d)"
+  cp "$INPUT" "$TEMPDIR"
+  pushd "$TEMPDIR" > /dev/null 2>&1
+  pdflatex --interaction=nonstopmode "$(basename "$INPUT")" > /dev/null 2>&1
+  popd > /dev/null 2>&1
+  mv "$TEMPDIR/*.pdf" .
+  rm -rf "$TEMPDIR"
+}
+
+################################################################################
 # install-nord-theme
 #
 # installs the nord theme for vim/tmux/etc
@@ -281,6 +309,19 @@ EOF
 }
 
 ################################################################################
+# install-sudoers
+#
+# sets up passwordless `sudo` access for the current $USER
+################################################################################
+install-sudoers() {
+  file="/etc/sudoers.d/$USER"
+  if [ ! -f "$file" ]; then
+    echo "$user ALL=(ALL) NOPASSWD:ALL" | sudo tee "$file" > /dev/null
+    sudo chmod 440 "$file"
+  fi
+}
+
+################################################################################
 # provision-ubuntu
 #
 # install the bare minimum system packages for ubuntu/debian
@@ -306,7 +347,8 @@ provision-ubuntu() {
     python3-pip \
     tmux \
     shellcheck \
-    shfmt
+    shfmt \
+    eza
 EOF
 }
 
@@ -407,6 +449,7 @@ has rsync       &&  alias rscp='rsync -avuP'
 has bat         &&  alias bat='bat --theme Nord'
 has bat         &&  export MANPAGER="sh -c 'col -bx | bat --theme Nord -l man -p'"
 has highlight   &&  alias dog='highlight -O ansi'
+has feh         &&  alias slideshow='feh -rzsZFD 5'
 
 # source external environment profiles
 [[ -f "$CARGOPATH"/env ]] && source "$CARGOPATH"/env
