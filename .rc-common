@@ -1,9 +1,33 @@
 ################################################################################
-# dbg "text to say"
-#
-# debug printer. silence unless DEBUG is set
-################################################################################
-dbg()   { if [[ -n "${DEBUG:-}" ]]; then 1>&2 printf 'DEBUG: %s\n' "$*"; fi; }
+# logging functions
+###############################################################################
+log::info() {
+  if ((LOG_LEVEL <= LOG_LEVEL_INFO)); then
+    printf >&2 '%s\n' "$*"
+  fi
+}
+
+log::error() {
+  if ((LOG_LEVEL <= LOG_LEVEL_ERROR)); then
+    local origin="${FUNCNAME[1]:-$SHELL}"
+    printf >&2 'ERROR: [%s] %s\n' "$origin" "$*"
+  fi
+}
+
+log::warning() {
+  if ((LOG_LEVEL <= LOG_LEVEL_WARN)); then
+    local origin="${FUNCNAME[1]:-$SHELL}"
+    printf >&2 'WARNING: [%s] %s\n' "$origin" "$*"
+  fi
+}
+
+
+log::debug() {
+  if ((LOG_LEVEL <= LOG_LEVEL_DEBUG)); then
+    local origin="${FUNCNAME[1]:-$SHELL}"
+    printf >&2 'DEBUG: [%s] %s\n' "$origin" "$*"
+  fi
+}
 
 ################################################################################
 # has <command>
@@ -20,103 +44,6 @@ has() { type "$1" &> /dev/null ; }
 is-url() {
   regex='(https?|ftp|file)://[-[:alnum:]\+&@#/%?=~_|!:,.;]*[-[:alnum:]\+&@#/%=~_|]'
   [[ $1 =~ $regex ]]
-}
-
-################################################################################
-# trash <file/dir>'s
-#
-# Move <file/dir>'s to $HOME/Trash
-################################################################################
-trash() {
-  local trash_dir="$HOME/Trash"
-  mkdir -p "$trash_dir" && mv -b -t "$trash_dir" -- "$@"
-}
-
-################################################################################
-# find-up [file]
-#
-# test existence of [file], traversing up from CWD.
-# on match print path and return, else return 1.
-################################################################################
-find-up() {
-  local file="${1:-.git}"
-
-  source_path="$(realpath -sm .)" || return 1
-  while [[ "${source_path}" != "/" ]]; do
-    if [[ -e "${source_path}/$name" ]]; then
-      printf '%s\n' "$source_path"
-      return 0
-    fi
-    source_path="$(dirname "$source_path")"
-  done
-  return 1
-}
-
-################################################################################
-# print if using uefi or bios
-################################################################################
-uefi-or-bios() {
-  [ -d /sys/firmware/efi ] && echo 'UEFI' || echo 'Legacy BIOS/CSM'
-}
-
-################################################################################
-# a poor mans `duh`: prints directories using the most space
-################################################################################
-disk-space() {
-  #du -hax "${1:-/}" 2> /dev/null | sort -nr | head -n 30
-  printf "Checking %s...\n" "$(realpath -s "${1:-.}")"
-  (cd "${1:-.}" && du -Lhsx ./* 2> /dev/null | sort -rh | head -20)
-}
-
-################################################################################
-# passgen [length]
-#
-# generate password 
-################################################################################
-passgen() { tr -dc "a-zA-Z0-9\!%^&;:" < /dev/urandom | fold -w "${1:-16}" | head -n 1; }
-
-################################################################################
-# ytmp3 <url>
-#
-# Convert youtube link to an mp3 in the CWD
-################################################################################
-ytmp3() {
-  url="${1:-}"
-  if [[ -z "$url" ]]; then
-    echo "Usage: ytmp3 <youtubeurl>"
-    echo ""
-    echo "convert youtube video to mp3"
-    return 1
-  fi
-
-  yt-dlp \
-    --extract-audio \
-    --audio-format "mp3" \
-    --restrict-filenames \
-    --output "%(title)s.%(ext)s" \
-    "$url"
-}
-
-################################################################################
-# ytwav <url>
-#
-# Convert youtube link to a wav in the CWD
-################################################################################
-ytwav() {
-  url="${1:-}"
-  if [[ -z "$url" ]]; then
-    echo "Usage: ytwav <youtubeurl>"
-    echo ""
-    echo "convert youtube video to wav"
-    return 1
-  fi
-
-  yt-dlp \
-    --extract-audio \
-    --audio-format "wav" \
-    --restrict-filenames \
-    --output "%(title)s.%(ext)s" \
-    "$url"
 }
 
 ################################################################################
@@ -141,19 +68,19 @@ symlink() {
   if [[ -f "$dest" && ! -h "$dest" ]]; then
     # destination exists and isn't a link; rename it.
     backup="$(dirname "$dest")/$(basename "$dest").$(date '+%s')"
-    info "Renaming file $dest -> $backup"
+    log::info "Renaming file $dest -> $backup"
     mv -f "$dest" "$backup"
   elif [[ ! -e "$dest" ]]; then
     # destination exists and is a broken symlink; remove it.
-    dbg "$dest exists and is broken"
+    log::debug "$dest exists and is broken"
     rm -f "$dest"
   else
-    dbg "do nothing for $dest"
+    log::debug "do nothing for $dest"
   fi
 
   # if the link doesn't exist, create it
   if [[ ! -h "$dest" ]]; then
-    dbg "Symlinking $src -> $dest"
+    log::debug "Symlinking $src -> $dest"
     mkdir -vp "$(dirname "$dest")"
     ln -bsf "$src" "$dest"
   fi
@@ -166,9 +93,6 @@ symlink() {
 #   Absolute path of cloned directory on success
 # Returns:
 #   1 on error
-#
-# Clone to `~/.local/src/dotfiles`: gitclone https://github.com/kmmiles/dotfiles
-# Clone to `/dotfiles`: gitclone https://github.com/kmmiles/dotfiles /
 ################################################################################
 gitclone() {
   local repo_url base_dir dest_dir
@@ -205,19 +129,116 @@ gitclone() {
 download() {
   local url filename filepath
 
-  url="${1:-}"
-  [[ -n "$url" ]] || return 1
-
-  filename="$(basename "$url")"
-  [[ -n "$filename" ]] || return 1
-
+  url="${1:-}"; [[ -n "$url" ]] || return 1
+  filename="$(basename "$url")"; [[ -n "$filename" ]] || return 1
   filepath="$DOWNLOAD_DIR/$filename"
+
   if [[ ! -f "$filepath" ]]; then
     mkdir -p "$DOWNLOAD_DIR"
     curl -fL -o "$filepath" "$url" || return 1
   fi
 
   printf '%s\n' "$filepath"
+}
+
+################################################################################
+# trash <file/dir>'s
+#
+# Move <file/dir>'s to $HOME/Trash
+################################################################################
+trash() {
+  local trash_dir="$HOME/Trash"
+  mkdir -p "$trash_dir" && mv -b -t "$trash_dir" -- "$@"
+}
+
+################################################################################
+# find-up [filename]
+#
+# test existence of [filename], traversing up from CWD.
+# on match print path and return, else return 1.
+################################################################################
+find-up() {
+  local filename="${1:-.git}"
+
+  source_path="$(realpath -sm .)" || return 1
+  while [[ "${source_path}" != "/" ]]; do
+    log::info "Looking for $source_path/$filename"
+    if [[ -e "${source_path}/$filename" ]]; then
+      printf '%s\n' "$source_path"
+      return 0
+    fi
+    source_path="$(dirname "$source_path")"
+  done
+  log::info "Couldn't find $filename"
+  return 1
+}
+
+################################################################################
+# print if using uefi or bios
+################################################################################
+uefi-or-bios() {
+  [ -d /sys/firmware/efi ] && echo 'UEFI' || echo 'Legacy BIOS/CSM'
+}
+
+################################################################################
+# a poor mans `duh`: prints directories using the most space
+################################################################################
+disk-space() {
+  #du -hax "${1:-/}" 2> /dev/null | sort -nr | head -n 30
+  printf "Checking %s...\n" "$(realpath -s "${1:-.}")"
+  (cd "${1:-.}" && du -Lhsx ./* 2> /dev/null | sort -rh | head -20)
+}
+
+################################################################################
+# passgen [length]
+#
+# generate password 
+################################################################################
+passgen() {
+  tr -dc "a-zA-Z0-9\!%^&;:" < /dev/urandom | fold -w "${1:-16}" | head -n 1
+}
+
+################################################################################
+# ytmp3 <url>
+#
+# Convert youtube link to an mp3 in the CWD
+################################################################################
+ytmp3() {
+  url="${1:-}"
+  if [[ -z "$url" ]]; then
+    printf 'Usage: ytmp3 <youtubeurl>\n\n'
+    printf 'convert youtube video to mp3\n'
+    return 1
+  fi
+
+  yt-dlp \
+    --extract-audio \
+    --audio-format "mp3" \
+    --restrict-filenames \
+    --output "%(title)s.%(ext)s" \
+    "$url"
+}
+
+################################################################################
+# ytwav <url>
+#
+# Convert youtube link to a wav in the CWD
+################################################################################
+ytwav() {
+  url="${1:-}"
+  if [[ -z "$url" ]]; then
+    echo "Usage: ytwav <youtubeurl>"
+    echo ""
+    echo "convert youtube video to wav"
+    return 1
+  fi
+
+  yt-dlp \
+    --extract-audio \
+    --audio-format "wav" \
+    --restrict-filenames \
+    --output "%(title)s.%(ext)s" \
+    "$url"
 }
 
 ################################################################################
@@ -239,13 +260,27 @@ tex2pdf() {
     return 1
   fi
 
-  local TEMPDIR="$(mktemp -d)"
+  local TEMPDIR
+  TEMPDIR="$(mktemp -d)"
   cp "$INPUT" "$TEMPDIR"
-  pushd "$TEMPDIR" > /dev/null 2>&1
+  pushd "$TEMPDIR" > /dev/null 2>&1 || return 1
   pdflatex --interaction=nonstopmode "$(basename "$INPUT")" > /dev/null 2>&1
-  popd > /dev/null 2>&1
+  popd > /dev/null 2>&1 || return 1
   mv "$TEMPDIR/*.pdf" .
   rm -rf "$TEMPDIR"
+}
+
+install-tmux-plugins() {
+  local target_dir="$HOME/.tmux/plugins/tpm"
+  if [[ ! -d "$target_dir" ]]; then
+    mkdir -p "$(dirname "$target_dir")"
+    git clone "${urls[tpm]}" "$target_dir"
+  fi
+  "$HOME"/.tmux/plugins/tpm/bin/install_plugins
+}
+
+install-vim-plugins() {
+  gitclone "${urls[ale]}" "$HOME/.vim/pack/git-plugins/start" > /dev/null
 }
 
 ################################################################################
@@ -254,9 +289,12 @@ tex2pdf() {
 # installs the nord theme for vim/tmux/etc
 ################################################################################
 install-nord-theme() {
-  symlink "$(gitclone "${urls[nord-dircolors]}")/src/dir_colors" "$HOME/.dir_colors" 
-  symlink "$(gitclone "${urls[nord-tmux]}")/nord.tmux" "$HOME/.tmux/nord.tmux" 
-  symlink "$(gitclone "${urls[nord-vim]}")/colors/nord.vim" "$HOME/.vim/colors/nord.vim" 
+  symlink \
+    "$(gitclone "${urls[nord-dircolors]}")/src/dir_colors" "$HOME/.dir_colors" 
+  symlink \
+    "$(gitclone "${urls[nord-tmux]}")/nord.tmux" "$HOME/.tmux/nord.tmux" 
+  symlink \
+    "$(gitclone "${urls[nord-vim]}")/colors/nord.vim" "$HOME/.vim/colors/nord.vim" 
 }
 
 ################################################################################
@@ -266,7 +304,7 @@ install-nord-theme() {
 ################################################################################
 install-vimrc() {
 
-  if has "nvim" && [[ ! -f "~/.config/nvim/init.vim" ]]; then
+  if has "nvim" && [[ ! -f "$HOME/.config/nvim/init.vim" ]]; then
     mkdir -p ~/.config/nvim
     cat <<EOF > "$HOME/.config/nvim/init.vim"
 set runtimepath^=~/.vim runtimepath+=~/.vim/after
@@ -316,7 +354,7 @@ EOF
 install-sudoers() {
   file="/etc/sudoers.d/$USER"
   if [ ! -f "$file" ]; then
-    echo "$user ALL=(ALL) NOPASSWD:ALL" | sudo tee "$file" > /dev/null
+    echo "$USER ALL=(ALL) NOPASSWD:ALL" | sudo tee "$file" > /dev/null
     sudo chmod 440 "$file"
   fi
 }
@@ -359,25 +397,22 @@ EOF
 ################################################################################
 ################################################################################
 ################################################################################
+LOG_LEVEL_UNSET=0
+LOG_LEVEL_DEBUG=10
+LOG_LEVEL_INFO=20
+LOG_LEVEL_WARN=30
+LOG_LEVEL_ERROR=40
+LOG_LEVEL=$LOG_LEVEL_INFO
+export LOG_LEVEL_UNSET
 
 # all urls used by functions and stuff, stored in an associative array
 #
 # access it like `echo ${urls[something]}`
 declare -A urls
-urls[dotfiles]="https://github.com/kmmiles/dotfiles.git"
-urls[zsh-syntax-highlighting]="https://github.com/zsh-users/zsh-syntax-highlighting"
-urls[zsh-autosuggestions]="https://github.com/zsh-users/zsh-autosuggestions"
-urls[zsh-history-substring-search]="https://github.com/zsh-users/zsh-history-substring-search"
-urls[zsh-completions]="https://github.com/zsh-users/zsh-completions"
 urls[nord-dircolors]="https://github.com/arcticicestudio/nord-dircolors"
 urls[nord-tmux]="https://github.com/arcticicestudio/nord-tmux"
 urls[nord-vim]="https://github.com/arcticicestudio/nord-vim"
-urls[odin]="https://github.com/Tetralux/odin.vim"
 urls[ale]="https://github.com/dense-analysis/ale.git"
-urls[vim-go]="https://github.com/fatih/vim-go.git"
-urls[tpm]="https://github.com/tmux-plugins/tpm"
-urls[youtube-dl]="https://yt-dl.org/downloads/latest/youtube-dl"
-urls[prettyping]="https://raw.githubusercontent.com/denilsonsa/prettyping/master/prettyping"
 
 # history
 HISTCONTROL=ignoredups:erasedups
@@ -451,6 +486,14 @@ has bat         &&  export MANPAGER="sh -c 'col -bx | bat --theme Nord -l man -p
 has highlight   &&  alias dog='highlight -O ansi'
 has feh         &&  alias slideshow='feh -rzsZFD 5'
 
-# source external environment profiles
-[[ -f "$CARGOPATH"/env ]] && source "$CARGOPATH"/env
+################################################################################
+# sourcing other env's
+################################################################################
+# fnm
 has fnm && eval "$(fnm env)" 
+# cargo
+[[ -f "$CARGOPATH"/env ]] && \
+  source "$CARGOPATH"/env
+
+################################################################################
+# vim: set filetype=sh tabstop=4 softtabstop=2 shiftwidth=2 expandtab :
