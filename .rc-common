@@ -364,7 +364,7 @@ install-sudoers() {
 #
 # install the bare minimum system packages for ubuntu/debian
 ################################################################################
-provision-ubuntu() {
+provision() {
   sudo bash <<EOF
   apt-get update -y
   apt-get upgrade -y
@@ -388,6 +388,40 @@ provision-ubuntu() {
     shfmt \
     eza
 EOF
+}
+
+provision-extended() {
+  sudo bash <<EOF
+  apt-get update -y
+  apt-get upgrade -y
+  apt-get install --no-install-recommends -y \
+    podman \
+    podman-docker \
+    uidmap \
+    slirp4netns \
+    cmake \
+    meson \
+    util-linux \
+    libncurses-dev \
+    libevent-dev \
+    qemu-utils \
+    btrfs-progs \
+    ntfs-3g \
+    exfat-fuse \
+    exfatprogs \
+    dosfstools
+EOF
+}
+
+wsl-fix-podman() {
+  local rundir
+
+  rundir="/run/user/$(id -u)"
+  if [[ ! -d "$rundir" ]]; then
+    log::warning "Creating missing $rundir"
+    sudo mkdir -p "$rundir" 
+    sudo chown "$(id -un):$(id -gn)" "$rundir"
+  fi
 }
 
 ################################################################################
