@@ -336,7 +336,7 @@ set clipboard=unnamedplus
 if has('nvim')
   colorscheme nord
 else
-  colorscheme elflord
+  colorscheme desert
 endif
 
 " In ~/.vim/vimrc, or somewhere similar.
@@ -360,11 +360,31 @@ install-sudoers() {
 }
 
 ################################################################################
+# provision-azure
+#
+# install system packages for dev environment on azure
+################################################################################
+provision-azure() {
+  sudo bash <<EOF
+    tdnf upgrade -y && \
+    tdnf install -y \
+      ca-certificates \
+      procps \
+      vim \
+      vim-extra \
+      unzip \
+      bc \
+      git \
+      tmux
+EOF
+}
+
+################################################################################
 # provision-ubuntu
 #
 # install the bare minimum system packages for ubuntu/debian
 ################################################################################
-provision() {
+provision-ubuntu() {
   sudo bash <<EOF
   apt-get update -y
   apt-get upgrade -y
