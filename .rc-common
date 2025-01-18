@@ -154,7 +154,7 @@ path::is_win() {
 # -e  Add the Extended Length Prefix
 ################################################################################
 path::to_win() {
-  local OPTIND rc absolute=false extlen=false
+  local OPTIND absolute=false extlen=false
   while getopts 'ae' flag; do
     case "${flag}" in
       a) absolute=true ;;
@@ -754,12 +754,12 @@ install-vim-plugins() {
 install-zig() {
   local tar_path
 
-  if ! has zig; then
+  if [[ ! -d "$ZIGPATH" ]]; then
     log::info "Zig not found, downloading: ${urls[zig]}"
     tar_path="$(download "${urls[zig]}")"
-    rm -rf ~/.local/zig ; mkdir -p ~/.local/zig
-    log::info "Extracting to ~/.local/zig"
-    tar xf "$tar_path" -C ~/.local/zig
+    mkdir -p "$ZIGPATH"
+    log::info "Extracting to $ZIGPATH"
+    tar xf "$tar_path" --strip-components=1 -C "$ZIGPATH"
   fi
 }
 
