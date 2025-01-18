@@ -30,11 +30,299 @@ log::debug() {
 }
 
 ################################################################################
+# Usage: str::trim <string>
+#
+# Prints string with leading/trailing whitespace removed
+################################################################################
+str::trim() {
+  local str="$*"
+  str="${str#"${str%%[![:space:]]*}"}"
+  str="${str%"${str##*[![:space:]]}"}"
+  printf '%s' "$str"
+}
+
+################################################################################
+# Usage: array::sort <params>
+#
+# Prints each parameter in sorted order
+################################################################################
+array::sort() { printf '%s\n' "$@" | LC_ALL=C sort; }
+
+################################################################################
+# Usage: array::diff <array1> <array2>
+#
+# Prints elements that exist in array2, which do not exist in array1.
+# Arrays are passed by name.
+#
+# readarray -t array1 < <(somecmd)
+# readarray -t array2 < <(somecmd)
+# printf '%s\n' "$(array::diff array1 array2)"
+#
+################################################################################
+array::diff() {
+  local -n arr1=$1
+  local -n arr2=$2
+  comm -13 <(array::sort "${arr1[@]}") <(array::sort "${arr2[@]}")
+}
+
+################################################################################
+# Usage: path::win::is_extlen <winpath>
+#
+# Returns success if <winpath> includes the Extended Length Prefix.
+# <https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file>
+################################################################################
+path::win::is_extlen() {
+  local s="${1:-}"
+  [[ "${s:0:4}" == "\\\\?\\" ]]
+}
+
+################################################################################
+# Usage: path::win::strip_extlen <winpath>
+#
+# Prints <winpath>, omitting the Extended Length Prefix if one exists.
+################################################################################
+path::win::strip_extlen() {
+  local path="${1:-}"
+  if path::win::is_extlen "$path"; then
+    printf '%s\n' "${path:4}"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+################################################################################
+# Usage: path::win::add_extlen <winpath>
+#
+# Prints <winpath>, adding the Extended Length Prefix if none exists.
+################################################################################
+path::win::add_extlen() {
+  local path="${1:-}"
+  if path::win::is_extlen "$path" || path::win::is_unc "$path"; then
+    printf '%s\n' "$path"
+  else
+    printf '%s\n' "\\\\?\\$path"
+  fi
+}
+
+################################################################################
+# Usage: path::win::is_unc <winpath>
+#
+# Returns success if <winpath> is a UNC path e.g. `\\somemachine\file.txt`
+################################################################################
+# shellcheck disable=SC1003
+path::win::is_unc() { ! path::win::is_extlen && [[ "${1:0:2}" == '\\' ]]; }
+
+################################################################################
+# Usage: path::unix::tilde <unixpath>
+#
+# Prints <unixpath>, expanding the `~` character to `$HOME`
+################################################################################
+path::unix::tilde() {
+  local path="${1:-}"
+  [[ -n "$path" ]] || return 1
+  [[ -n "${HOME:-/root}" ]] || return 1
+  # FIXME: doesn't handle ~user
+
+  if [[ $path =~ ^~ ]]; then
+    printf '%s\n' "${HOME:-/root}${path:1}"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+################################################################################
+# Usage: path::is_win <path>
+#
+# Returns success if <path> is a Windows path.
+################################################################################
+path::is_win() {
+  local path="${1:-}"
+  [[ -n "$path" ]] || return 1
+  path::win::is_extlen "$path" \
+    || [[ $path =~ ^[a-zA-Z]:\\ ]] \
+    || [[ $path =~ ^\.\\ ]]
+}
+
+################################################################################
+# Usage: path::to_win [options] <path>
+#
+# Prints path, converting it to Windows format.
+#
+# [options]
+#
+# -a  Convert path to absolute
+# -e  Add the Extended Length Prefix
+################################################################################
+path::to_win() {
+  local OPTIND rc absolute=false extlen=false
+  while getopts 'ae' flag; do
+    case "${flag}" in
+      a) absolute=true ;;
+      e) extlen=true ;;
+      *)
+        return 1
+        ;;
+    esac
+  done
+
+  shift $((OPTIND - 1))
+  local path="${1:-}"
+  if [[ -z "$path" ]]; then
+    return 1
+  fi
+  shift 1
+
+  if ! path::is_win "$path"; then
+    path="$(path::unix::tilde "$path")"
+    if $absolute; then
+      path="$(wslpath -wa "$path")"
+    else
+      path="$(wslpath -w "$path")"
+    fi
+  fi
+
+  if $extlen; then
+    path="$(path::win::add_extlen "$path")"
+  else
+    path="$(path::win::strip_extlen "$path")"
+  fi
+
+  printf '%s\n' "$path"
+}
+
+################################################################################
+# Usage: path::to_unix [options] <path>
+#
+# Prints <path>, converting it to "unix" format.
+#
+# [options]
+#
+# -a  Convert path to absolute
+# -e  Add the Extended Length Prefix
+################################################################################
+path::to_unix() {
+  local OPTIND absolute=false
+  while getopts 'a' flag; do
+    case "${flag}" in
+      a) absolute=true ;;
+      *)
+        return 1
+        ;;
+    esac
+  done
+
+  shift $((OPTIND - 1))
+  local path="${1:-}"
+  if [[ -z "$path" ]]; then
+    return 1
+  fi
+  shift 1
+
+  if path::is_win "$path"; then
+    path=$(wslpath -u "$(path::win::strip_extlen "$path")")
+  else
+    path="$(path::unix::tilde "$path")"
+  fi
+
+  if $absolute; then path="$(realpath -sm "$path")"; fi
+
+  printf '%s\n' "$path"
+}
+
+################################################################################
+# Usage: ini::is_section <line>
+#
+# Return success if <line> is a section, and print it's name
+################################################################################
+ini::is_section() {
+  local line="${1:-}"
+  local len="${#line}"
+  if [[ "${line:0:1}" == "[" ]] && [[ "${line:$((len - 1)):1}" == "]" ]]; then
+    printf '%s\n' "${line:1:$((len - 2))}"
+    return 0
+  fi
+  return 1
+}
+
+################################################################################
+# Usage: ini::read_section <output> <section> <file>
+#
+# Read values from <section> of <file> and store into <output>
+# <output> is a name reference to an associative array
+################################################################################
+ini::read_section() {
+  local -n output=${1:-}
+  local section=${2:-}
+  [[ -n "$section" ]] || return 1
+  local file=${3:-}
+  [[ -n "$file" ]] || return 2
+  [[ -f "$file" ]] || return 3
+
+  local found=false
+  while read -r line; do
+    # skip blank lines
+    [[ -n "$line" ]] || continue
+
+    # is this our target section? sections names are vhd's, so convert
+    # each end to unix to normalize the test (so vhd's can be referenced
+    # by any path format)
+    if [[ "$(path::to_unix "$(ini::is_section "$line")")" == \
+      "$(path::to_unix "$section")" ]]; then
+      # we found our target section
+      output['section']="$(str::trim "$section")"
+      found=true
+      continue
+    elif $found && ini::is_section "$line" >/dev/null; then
+      # we hit another section after finding ours. so we're done.
+      return 0
+    elif $found; then
+      # we're in a line in our target section. so assign key and value.
+      local key value
+      key=$(cut -d'=' -f 1 <<<"$line")
+      value=$(cut -d'=' -f 2 <<<"$line")
+      # shellcheck disable=SC2034
+      output[$(str::trim "$key")]="$(str::trim "$value")"
+      continue
+    fi
+  done <"$file"
+
+  # success if we found our section, otherwise error
+  if ! $found; then
+    return 1
+  fi
+}
+
+################################################################################
+# ini::list_sections <inifile>
+#
+# Print name of each ini section in <inifile>
+################################################################################
+ini::list_sections() {
+  local file=${1:-}
+  [[ -n "$file" ]] || return 1 
+  [[ -f "$file" ]] || return 2
+
+  local section
+  while read -r line; do
+    if section=$(ini::is_section "$line"); then
+      printf '%s\n' "$section"
+    fi
+  done <"$file"
+}
+
+################################################################################
 # has <command>
 #
 # tests if <command> exists 
 ################################################################################
 has() { type "$1" &> /dev/null ; } 
+
+################################################################################
+# lastarg <arguments>
+#
+# print last arg in <arguments>
+################################################################################
+lastarg() { for i in "$@"; do :; done; printf '%s\n' "${i:-}" ; }
 
 ################################################################################
 # is-url <url>
@@ -45,6 +333,39 @@ is-url() {
   regex='(https?|ftp|file)://[-[:alnum:]\+&@#/%?=~_|!:,.;]*[-[:alnum:]\+&@#/%=~_|]'
   [[ $1 =~ $regex ]]
 }
+
+################################################################################
+# Usage: filesystems
+#
+# Print supported filesystems, one per line.
+################################################################################
+filesystems() {
+  gen() {
+    while read -ra vals; do
+      [[ "${vals[0]}" == "nodev" ]] && continue
+      if PATH=/sbin:/usr/sbin command -v "mkfs.${vals[0]}" >/dev/null 2>&1; then
+        printf '%s\n' "${vals[0]}"
+      else
+        log::info "mkfs.${vals[0]} not found (package not installed?)"
+      fi
+    done </proc/filesystems
+
+    # fuse drivers
+    for fs in ntfs exfat-fuse; do
+      if PATH=/sbin:/usr/sbin command -v "mount.$fs" >/dev/null 2>&1; then
+        if [[ "$fs" == "exfat-fuse" ]]; then
+          printf 'exfat\n'
+        else
+          printf '%s\n' "$fs"
+        fi
+      else
+        log::info "mount.$fs not found (package not installed?)"
+      fi
+    done
+  }
+  gen | sort -d
+}
+
 
 ################################################################################
 # Create a symlink
@@ -131,10 +452,10 @@ download() {
 
   url="${1:-}"; [[ -n "$url" ]] || return 1
   filename="$(basename "$url")"; [[ -n "$filename" ]] || return 1
-  filepath="$DOWNLOAD_DIR/$filename"
+  filepath="$DOWNLOADS/$filename"
 
   if [[ ! -f "$filepath" ]]; then
-    mkdir -p "$DOWNLOAD_DIR"
+    mkdir -p "$DOWNLOADS"
     curl -fL -o "$filepath" "$url" || return 1
   fi
 
@@ -156,6 +477,9 @@ trash() {
 #
 # test existence of [filename], traversing up from CWD.
 # on match print path and return, else return 1.
+#
+# FIXME: Change [filename] to [filenames...] and allow searching for multiple
+# file types. Then get rid of find-container-file.
 ################################################################################
 find-up() {
   local filename="${1:-.git}"
@@ -171,6 +495,150 @@ find-up() {
   done
   log::info "Couldn't find $filename"
   return 1
+}
+
+################################################################################
+# find_container_file [directory]
+#
+# XXX: stupid version of the above, replace it.
+################################################################################
+find_container_file() {
+  local source_path="${1:-.}"
+  source_path="$(realpath -sm "$source_path")"
+  if [[ ! -d "$source_path" ]]; then
+    return 1
+  fi
+
+  while [[ "$source_path" != "/" ]]; do
+    if [[ -f "$source_path"/Dockerfile ]]; then
+      printf '%s/Dockerfile\n' "$source_path"
+      return 0
+    elif [[ -f "$source_path"/Containerfile ]]; then
+      printf '%s/Containerfile\n' "$source_path"
+      return 0
+    else
+      source_path="$(dirname "$source_path")"
+    fi
+  done
+
+  return 1
+}
+
+focker_run() {
+  local exe
+  if command -v "podman" > /dev/null; then
+    exe="podman"
+    rundir="/run/user/$(id -u)"
+    if [[ ! -d "$rundir" ]]; then
+      warn "Creating missing $rundir"
+      sudo mkdir -p "$rundir" 
+      sudo chown "$(id -un):$(id -gn)" "$rundir"
+    fi
+  elif command -v "docker" > /dev/null; then
+    exe="docker"
+  else 
+    return 1
+  fi
+
+  args=("$@")
+  1>&2 printf 'Executing: %s %s\n' "$exe" "${args[*]}"
+  $exe "${args[@]}"
+}
+
+focker() {
+  # parse args...i know
+  local args _lastarg container_file container_root cmd
+  args=("$@")
+  _lastarg="$(lastarg "${args[@]}")"
+  if [[ -n "$_lastarg" ]] && [[ -f "$_lastarg" ]]; then
+    # last arg is a file
+    container_file="$(realpath -sm "$_lastarg")"
+    unset "args[${#args[@]}-1]"
+  elif [[ -n "$_lastarg" ]] && [[ -d "$_lastarg" ]]; then
+    # last arg is a dir
+    container_file="$(find_container_file "$_lastarg")"
+    unset "args[${#args[@]}-1]"
+  else
+    container_file="$(find_container_file)"
+  fi
+  container_root="$(dirname "$container_file")"
+  cmd="${args[0]:-build}"
+  unset "args[0]"
+
+
+  # determine tag name.
+  # if container_file is named `Containerfile.something` then `something` will be added to the tag
+  # e.g. myproject:something
+  local tag_name
+  tag_name="$(basename "$container_root")"
+  x=$(basename "$container_file" | cut -s -d. -f 2)
+  if [[ -n "$x" ]]; then
+    tag_name="${tag_name}:${x}"
+  fi
+
+  #printf 'x=%s, container_root=%s, container_file=%s, tag_name=%s\n' "$x" "$container_root" "$container_file" "$tag_name"
+  #exit 1
+
+  case "${cmd}" in
+    "build")
+      args=("-f" "$container_file" "${args[@]}")
+      focker_run "build" "${args[@]}" "-t" "$tag_name" "."
+      ;;
+    "run")
+      focker_run "run" "${args[@]}" "-v" "$container_root:/mnt" \
+        "--rm" "--name" "$tag_name" "$tag_name"
+      ;;
+    "shell")
+      focker_run "run" "${args[@]}" "-v" "$container_root:/mnt" \
+        "-it" "--rm" "$tag_name" "sh"
+      ;;
+    "bash")
+      focker_run "run" "${args[@]}" "-v" "$container_root:/mnt" \
+        "-it" "--rm" "$tag_name" "bash"
+      ;;
+    "zsh")
+      focker_run "run" "${args[@]}" "-v" "$container_root:/mnt" \
+        "-it" "--rm" "$tag_name" "zsh"
+      ;;
+    "ls"|"list")
+      focker_run "container" "list" "--all" "--external"
+      ;;
+    "export")
+      focker_run "container" "rm" "$tag_name"
+      focker_run "run" "--name" "$tag_name" "$tag_name"
+      focker_run "export" "--output" "${tag_name}-rootfs.tar" "$tag_name" 
+      ;;
+    "wslexport")
+      rm -rf "${tag_name}-wsl"
+      mkdir -p "${tag_name}-wsl"
+      focker_run "container" "rm" "$tag_name" || :
+      focker_run "run" "--name" "$tag_name" "$tag_name"
+      focker_run "export" "--output" "${tag_name}-wsl/rootfs.tar" "$tag_name" 
+      print_wsl_bat "$tag_name" > "${tag_name}-wsl/install.bat"
+      ;;
+    "mrproper")
+      focker_run "container" "list" "--all" "--external" | \
+        while read -r line; do
+          id="$(echo "$line" | awk '{print $1}')"
+          if [[ -n "$id" ]] && [[ "$id" != "CONTAINER" ]]; then
+            focker_run "container" "rm" "-f" "$id"
+          fi
+        done
+      focker_run "system" "reset" "-f"
+      if [[ -d "$HOME/.cache/podman" ]]; then
+        rm -rf "$HOME/.cache/podman"
+        mkdir -p "$HOME/.cache/podman"
+      fi
+      ;;
+    *)
+      printf '%s is not a valid command\n' "$cmd"
+      printf 'Usage: %s [command [podman args]] [Containerfile]\n\n' \
+        "$(basename "$0")"
+      printf '[command]\tAvailable options: "build", "run", "shell"\n'
+      printf '\t\tDefault option: "shell"\n'
+      return 1
+      ;;
+  esac
 }
 
 ################################################################################
@@ -281,6 +749,18 @@ install-tmux-plugins() {
 
 install-vim-plugins() {
   gitclone "${urls[ale]}" "$HOME/.vim/pack/git-plugins/start" > /dev/null
+}
+
+install-zig() {
+  local tar_path
+
+  if ! has zig; then
+    log::info "Zig not found, downloading: ${urls[zig]}"
+    tar_path="$(download "${urls[zig]}")"
+    rm -rf ~/.local/zig ; mkdir -p ~/.local/zig
+    log::info "Extracting to ~/.local/zig"
+    tar xf "$tar_path" -C ~/.local/zig
+  fi
 }
 
 ################################################################################
@@ -401,20 +881,13 @@ provision-ubuntu() {
     curl \
     unzip \
     bc \
+    jq \
     python3 \
     python3-pip \
     tmux \
     shellcheck \
     shfmt \
-    eza
-EOF
-}
-
-provision-extended() {
-  sudo bash <<EOF
-  apt-get update -y
-  apt-get upgrade -y
-  apt-get install --no-install-recommends -y \
+    eza \
     podman \
     podman-docker \
     uidmap \
@@ -467,6 +940,7 @@ urls[nord-dircolors]="https://github.com/arcticicestudio/nord-dircolors"
 urls[nord-tmux]="https://github.com/arcticicestudio/nord-tmux"
 urls[nord-vim]="https://github.com/arcticicestudio/nord-vim"
 urls[ale]="https://github.com/dense-analysis/ale.git"
+urls[zig]="https://ziglang.org/builds/zig-linux-x86_64-0.14.0-dev.2802+257054a14.tar.xz"
 
 # history
 HISTCONTROL=ignoredups:erasedups
@@ -492,22 +966,48 @@ export LESS_TERMCAP_so=$'\e[01;33m'
 export LESS_TERMCAP_ue=$'\e[0m'
 export LESS_TERMCAP_us=$'\e[1;4;31m'
 
-# define some paths
-DOWNLOAD_DIR="$HOME/Downloads"
-LOCAL_DIR="$HOME/.local"
-LOCAL_BIN_DIR="$LOCAL_DIR/bin"
-LOCAL_SRC_DIR="$LOCAL_DIR/src"
-export DOWNLOAD_DIR LOCAL_DIR LOCAL_BIN_DIR LOCAL_SRC_DIR
+################################################################################
+# dirs in $HOME that feel special
+################################################################################
+DOWNLOADS="$HOME/Downloads"
+LOCAL="$HOME/.local"
+LOCAL_SRC="$LOCAL/src"
+export DOWNLOADS LOCAL LOCAL_SRC
 
+################################################################################
+# dirs in $HOME that we'd like to be in $PATH, if they exist.
+################################################################################
+# ~/.local/bin
+LOCAL_BIN="$LOCAL/bin"
+if [[ -d "$LOCAL_BIN" ]]; then
+  PATH="$PATH:$LOCAL_BIN"
+  export LOCAL_BIN PATH
+fi
+
+# Zig
+ZIGPATH="$HOME"/.local/zig
+if [[ -d "$ZIGPATH" ]]; then
+  PATH="$PATH:$ZIGPATH"
+  export ZIGPATH PATH
+fi
+
+# Go
 GOPATH="$HOME"/.local/go
-CARGOPATH="$HOME/.cargo"
-export GOPATH CARGOPATH
+if [[ -d "$GOPATH" ]]; then
+  PATH="$PATH:$GOPATH"
+  export GOPATH PATH
+fi
 
-# PATH
-PATH="$PATH:$LOCAL_BIN_DIR:$GOPATH:$CARGOPATH"
-export PATH
+# Cargo
+CARGOPATH="$HOME"/.cargo
+if [[ -d "$CARGOPATH" ]]; then
+  PATH="$PATH:$CARGOPATH"
+  export CARGOPATH PATH
+fi
 
+################################################################################
 # create aliases based on the installed tools
+################################################################################
 if has exa; then 
   alias ls='exa --octal-permissions --color=always -g --icons --git --sort new'
 else
@@ -546,6 +1046,7 @@ has feh         &&  alias slideshow='feh -rzsZFD 5'
 # fnm
 has fnm && eval "$(fnm env)" 
 # cargo
+# shellcheck source=/dev/null
 [[ -f "$CARGOPATH"/env ]] && \
   source "$CARGOPATH"/env
 
