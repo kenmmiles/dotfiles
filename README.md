@@ -1,5 +1,25 @@
 # dotfiles
 
-my dotfiles, which hopefully consists entirely of one profile: `.rc-common`.
-this can be sourced by `bash` or `zsh`.
+my dotfiles
 
+## usage
+
+```
+source .rc-common
+```
+
+## install
+
+creates dotfiles in current users home
+
+```
+dotfiles::install
+```
+
+## provision
+
+provisions system i.e. install packages, setup passwordless `sudo`, etc
+
+```
+dotfiles::provision
+```
