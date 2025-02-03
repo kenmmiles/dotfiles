@@ -13,7 +13,7 @@ source .rc-common
 creates dotfiles in current users home
 
 ```
-dotfiles::install
+dotfiles-install
 ```
 
 ## provision
@@ -21,5 +21,5 @@ dotfiles::install
 provisions system i.e. install packages, setup passwordless `sudo`, etc
 
 ```
-dotfiles::provision
+dotfiles-provision
 ```

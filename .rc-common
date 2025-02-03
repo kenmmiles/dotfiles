@@ -14,11 +14,13 @@ lls[error]=40
 declare -A paths
 paths[downloads]="$HOME/Downloads"
 paths[local]="$HOME/.local"
-paths[src]="$LOCAL/src"
-paths[bin]="$LOCAL/bin"
-paths[zig]="$LOCAL/zig"
-paths[go]="$LOCAL/go"
 paths[cargo]="$HOME/.cargo"
+paths[bun]="$HOME/.bun"
+paths[src]="${paths[local]}/src"
+paths[bin]="${paths[local]}/bin"
+paths[zig]="${paths[local]}/zig"
+paths[go]="${paths[local]}/go"
+paths[fnm]="${paths[local]}/share/fnm"
 
 # urls
 declare -A urls
@@ -26,13 +28,18 @@ urls[nord-dircolors]="https://github.com/arcticicestudio/nord-dircolors"
 urls[nord-tmux]="https://github.com/arcticicestudio/nord-tmux"
 urls[nord-vim]="https://github.com/arcticicestudio/nord-vim"
 urls[ale]="https://github.com/dense-analysis/ale.git"
-urls[zig]="https://ziglang.org/builds/zig-linux-x86_64-0.14.0-dev.2802+257054a14.tar.xz"
+#urls[zig]="https://ziglang.org/builds/zig-linux-x86_64-0.14.0-dev.2802+257054a14.tar.xz"
+urls[zig]="https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz"
 
 # ubuntu packages
-ubuntu_packages=( ca-certificates build-essential automake pkg-config yacc bash zsh procps git \
-curl unzip bc jq python3 python3-pip tmux shellcheck shfmt eza podman podman-docker \
-slirp4netns cmake meson util-linux libncurses-dev libevent-dev qemu-utils btrfs-progs \
-ntfs-3g exfat-fuse exfatprogs dosfstools dos2unix uidmap )
+ubuntu_packages=( \
+  ca-certificates build-essential automake pkg-config \
+  yacc bash zsh procps git curl unzip bc jq python3 \
+  python3-pip tmux shellcheck shfmt eza podman podman-docker \
+  slirp4netns cmake meson util-linux libncurses-dev \
+  libevent-dev qemu-utils btrfs-progs ntfs-3g exfat-fuse \
+  exfatprogs dosfstools dos2unix uidmap ripgrep \
+)
 
 # azure packages
 azure_packages=( ca-certificates procps vim vim-extra unzip bc git tmux )
@@ -132,11 +139,11 @@ passgen() {
 }
 
 ################################################################################
-# Usage: str::trim <string>
+# Usage: trim <string>
 #
 # Prints string with leading/trailing whitespace removed
 ################################################################################
-str::trim() {
+trim() {
   local str="$*"
   str="${str#"${str%%[![:space:]]*}"}"
   str="${str%"${str##*[![:space:]]}"}"
@@ -144,13 +151,88 @@ str::trim() {
 }
 
 ################################################################################
-# str::is-url <string>
+# is-url <string>
 #
 # test if <string> is a url
 ################################################################################
-str::is-url() {
+is-url() {
   regex='(https?|ftp|file)://[-[:alnum:]\+&@#/%?=~_|!:,.;]*[-[:alnum:]\+&@#/%=~_|]'
   [[ $1 =~ $regex ]]
+}
+
+################################################################################
+# Usage: has-extlen <path>
+#
+# Returns success if <path> includes the Extended Length Prefix.
+# <https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file>
+################################################################################
+has-extlen() { local s="${1:-}"; [[ "${s:0:4}" == "\\\\?\\" ]] ; }
+
+################################################################################
+# Usage: strip-extlen <path>
+#
+# Prints <path>, omitting the Extended Length Prefix if one exists.
+################################################################################
+strip-extlen() {
+  local path="${1:-}"
+  if has-extlen "$path"; then
+    printf '%s\n' "${path:4}"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+################################################################################
+# Usage: add-extlen <path>
+#
+# Prints <path>, adding the Extended Length Prefix if none exists.
+################################################################################
+add-extlen() {
+  local path="${1:-}"
+  if has-extlen "$path" || is-unc "$path"; then
+    printf '%s\n' "$path"
+  else
+    printf '%s\n' "\\\\?\\$path"
+  fi
+}
+
+################################################################################
+# Usage: is-unc <path>
+#
+# Returns success if <path> is a UNC path e.g. `\\somemachine\file.txt`
+################################################################################
+# shellcheck disable=SC1003
+is-unc() { ! has-extlen "$@" && [[ "${1:0:2}" == '\\' ]]; }
+
+################################################################################
+# Usage: tilde <path>
+#
+# Prints <path>, expanding the `~` character to `$HOME`
+################################################################################
+tilde() {
+  local path="${1:-}"
+  [[ -n "$path" ]] || return 1
+  [[ -n "${HOME:-/root}" ]] || return 1
+  # FIXME: doesn't handle ~user
+
+  if [[ $path =~ ^~ ]]; then
+    printf '%s\n' "${HOME:-/root}${path:1}"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+################################################################################
+# Usage: is-winpath <path>
+#
+# Returns success if <path> is a Windows path.
+################################################################################
+is-winpath() {
+  local path="${1:-}"
+  [[ -n "$path" ]] || return 1
+  has-extlen "$path" \
+    || [[ $path =~ ^[a-zA-Z]:\\ ]] \
+    || [[ $path =~ ^\.\\ ]]
 }
 
 ################################################################################
@@ -175,170 +257,6 @@ array::diff() {
   local -n arr1=$1
   local -n arr2=$2
   comm -13 <(array::sort "${arr1[@]}") <(array::sort "${arr2[@]}")
-}
-
-################################################################################
-# Usage: path::win::is_extlen <winpath>
-#
-# Returns success if <winpath> includes the Extended Length Prefix.
-# <https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file>
-################################################################################
-path::win::is_extlen() {
-  local s="${1:-}"
-  [[ "${s:0:4}" == "\\\\?\\" ]]
-}
-
-################################################################################
-# Usage: path::win::strip_extlen <winpath>
-#
-# Prints <winpath>, omitting the Extended Length Prefix if one exists.
-################################################################################
-path::win::strip_extlen() {
-  local path="${1:-}"
-  if path::win::is_extlen "$path"; then
-    printf '%s\n' "${path:4}"
-  else
-    printf '%s\n' "$path"
-  fi
-}
-
-################################################################################
-# Usage: path::win::add_extlen <winpath>
-#
-# Prints <winpath>, adding the Extended Length Prefix if none exists.
-################################################################################
-path::win::add_extlen() {
-  local path="${1:-}"
-  if path::win::is_extlen "$path" || path::win::is_unc "$path"; then
-    printf '%s\n' "$path"
-  else
-    printf '%s\n' "\\\\?\\$path"
-  fi
-}
-
-################################################################################
-# Usage: path::win::is_unc <winpath>
-#
-# Returns success if <winpath> is a UNC path e.g. `\\somemachine\file.txt`
-################################################################################
-# shellcheck disable=SC1003
-path::win::is_unc() { ! path::win::is_extlen && [[ "${1:0:2}" == '\\' ]]; }
-
-################################################################################
-# Usage: path::unix::tilde <unixpath>
-#
-# Prints <unixpath>, expanding the `~` character to `$HOME`
-################################################################################
-path::unix::tilde() {
-  local path="${1:-}"
-  [[ -n "$path" ]] || return 1
-  [[ -n "${HOME:-/root}" ]] || return 1
-  # FIXME: doesn't handle ~user
-
-  if [[ $path =~ ^~ ]]; then
-    printf '%s\n' "${HOME:-/root}${path:1}"
-  else
-    printf '%s\n' "$path"
-  fi
-}
-
-################################################################################
-# Usage: path::is_win <path>
-#
-# Returns success if <path> is a Windows path.
-################################################################################
-path::is_win() {
-  local path="${1:-}"
-  [[ -n "$path" ]] || return 1
-  path::win::is_extlen "$path" \
-    || [[ $path =~ ^[a-zA-Z]:\\ ]] \
-    || [[ $path =~ ^\.\\ ]]
-}
-
-################################################################################
-# Usage: path::to_win [options] <path>
-#
-# Prints path, converting it to Windows format.
-#
-# [options]
-#
-# -a  Convert path to absolute
-# -e  Add the Extended Length Prefix
-################################################################################
-path::to_win() {
-  local OPTIND absolute=false extlen=false
-  while getopts 'ae' flag; do
-    case "${flag}" in
-      a) absolute=true ;;
-      e) extlen=true ;;
-      *)
-        return 1
-        ;;
-    esac
-  done
-
-  shift $((OPTIND - 1))
-  local path="${1:-}"
-  if [[ -z "$path" ]]; then
-    return 1
-  fi
-  shift 1
-
-  if ! path::is_win "$path"; then
-    path="$(path::unix::tilde "$path")"
-    if $absolute; then
-      path="$(wslpath -wa "$path")"
-    else
-      path="$(wslpath -w "$path")"
-    fi
-  fi
-
-  if $extlen; then
-    path="$(path::win::add_extlen "$path")"
-  else
-    path="$(path::win::strip_extlen "$path")"
-  fi
-
-  printf '%s\n' "$path"
-}
-
-################################################################################
-# Usage: path::to_unix [options] <path>
-#
-# Prints <path>, converting it to "unix" format.
-#
-# [options]
-#
-# -a  Convert path to absolute
-# -e  Add the Extended Length Prefix
-################################################################################
-path::to_unix() {
-  local OPTIND absolute=false
-  while getopts 'a' flag; do
-    case "${flag}" in
-      a) absolute=true ;;
-      *)
-        return 1
-        ;;
-    esac
-  done
-
-  shift $((OPTIND - 1))
-  local path="${1:-}"
-  if [[ -z "$path" ]]; then
-    return 1
-  fi
-  shift 1
-
-  if path::is_win "$path"; then
-    path=$(wslpath -u "$(path::win::strip_extlen "$path")")
-  else
-    path="$(path::unix::tilde "$path")"
-  fi
-
-  if $absolute; then path="$(realpath -sm "$path")"; fi
-
-  printf '%s\n' "$path"
 }
 
 ################################################################################
@@ -378,10 +296,10 @@ ini::read_section() {
     # is this our target section? sections names are vhd's, so convert
     # each end to unix to normalize the test (so vhd's can be referenced
     # by any path format)
-    if [[ "$(path::to_unix "$(ini::is_section "$line")")" == \
-      "$(path::to_unix "$section")" ]]; then
+    if [[ "$(unixpath "$(ini::is_section "$line")")" == \
+      "$(unixpath "$section")" ]]; then
       # we found our target section
-      output['section']="$(str::trim "$section")"
+      output['section']="$(trim "$section")"
       found=true
       continue
     elif $found && ini::is_section "$line" >/dev/null; then
@@ -393,7 +311,7 @@ ini::read_section() {
       key=$(cut -d'=' -f 1 <<<"$line")
       value=$(cut -d'=' -f 2 <<<"$line")
       # shellcheck disable=SC2034
-      output[$(str::trim "$key")]="$(str::trim "$value")"
+      output[$(trim "$key")]="$(trim "$value")"
       continue
     fi
   done <"$file"
@@ -420,6 +338,92 @@ ini::list_sections() {
       printf '%s\n' "$section"
     fi
   done <"$file"
+}
+
+################################################################################
+# Usage: winpath [options] <path>
+#
+# Prints path, converting it to Windows format.
+#
+# [options]
+#
+# -a  Convert path to absolute
+# -e  Add the Extended Length Prefix
+################################################################################
+winpath() {
+  local OPTIND absolute=false extlen=false
+  while getopts 'ae' flag; do
+    case "${flag}" in
+      a) absolute=true ;;
+      e) extlen=true ;;
+      *)
+        return 1
+        ;;
+    esac
+  done
+
+  shift $((OPTIND - 1))
+  local path="${1:-}"
+  if [[ -z "$path" ]]; then
+    return 1
+  fi
+  shift 1
+
+  if ! is-winpath "$path"; then
+    path="$(tilde "$path")"
+    if $absolute; then
+      path="$(wslpath -wa "$path")"
+    else
+      path="$(wslpath -w "$path")"
+    fi
+  fi
+
+  if $extlen; then
+    path="$(add-extlen "$path")"
+  else
+    path="$(strip-extlen "$path")"
+  fi
+
+  printf '%s\n' "$path"
+}
+
+################################################################################
+# Usage: unixpath [options] <path>
+#
+# Prints <path>, converting it to "unix" format.
+#
+# [options]
+#
+# -a  Convert path to absolute
+# -e  Add the Extended Length Prefix
+################################################################################
+unixpath() {
+  local OPTIND absolute=false
+  while getopts 'a' flag; do
+    case "${flag}" in
+      a) absolute=true ;;
+      *)
+        return 1
+        ;;
+    esac
+  done
+
+  shift $((OPTIND - 1))
+  local path="${1:-}"
+  if [[ -z "$path" ]]; then
+    return 1
+  fi
+  shift 1
+
+  if is-winpath "$path"; then
+    path=$(wslpath -u "$(strip-extlen "$path")")
+  else
+    path="$(tilde "$path")"
+  fi
+
+  if $absolute; then path="$(realpath -sm "$path")"; fi
+
+  printf '%s\n' "$path"
 }
 
 ################################################################################
@@ -454,6 +458,23 @@ filesystems() {
   gen | sort -d
 }
 
+################################################################################
+# Usage: is-mounted <path>
+#
+# Return success if <path> is mounted. If there's an associated device,
+# print the path to it
+################################################################################
+is-mounted() {
+  local mountpoint
+  mountpoint="${1:-}"; [[ -n "$mountpoint" ]] || return 1
+
+  local source_value
+  source_value=$(findmnt -n -f --output SOURCE "$mountpoint") || return 1
+
+  if [[ "${source_value:0:4}" == "/dev" ]]; then
+    printf '%s\n' "$source_value"
+  fi
+}
 
 ################################################################################
 # Create a symlink
@@ -671,12 +692,7 @@ focker() {
         "-it" "--rm" "$tag_name" "sh"
       ;;
     "bash")
-      focker_run "run" "${args[@]}" "-v" "$container_root:/mnt" \
-        "-it" "--rm" "$tag_name" "bash"
-      ;;
-    "zsh")
-      focker_run "run" "${args[@]}" "-v" "$container_root:/mnt" \
-        "-it" "--rm" "$tag_name" "zsh"
+      focker_run "run" "${args[@]}" "-it" "--rm" "--entrypoint" "/bin/bash" "$tag_name"
       ;;
     "ls"|"list")
       focker_run "container" "list" "--all" "--external"
@@ -808,7 +824,7 @@ wsl-fix-podman() {
 ################################################################################
 # install dotfiles to $HOME
 ################################################################################
-dotfiles::install() {
+dotfiles-install() {
   # create vimrc if it doesn't exist
   if [[ ! -f "$HOME"/.vimrc ]]; then
     linfo "creating .vimrc"
@@ -826,6 +842,7 @@ set expandtab
 set backspace=2
 set modeline
 set clipboard=unnamedplus
+set nolist
 "set spell spelllang=en_us
 
 "  autocmd vimenter * ++nested colorscheme gruvbox
@@ -889,7 +906,7 @@ EOF
 ################################################################################
 # install system level things i.e. things that need root
 ################################################################################
-dotfiles::provision() {
+dotfiles-provision() {
   local file="/etc/sudoers.d/$USER"
   if [ ! -f "$file" ]; then
     linfo "setting up passwordless sudo @ $file"
@@ -919,10 +936,15 @@ main() {
     LOG_LEVEL=${lls[info]}
   fi
 
-  for newpath in "${paths[bin]}" "${paths[zig]}" \
-    "${paths[go]}" "${paths[cargo]}"; do
+  for newpath in \
+    "${paths[bin]}" "${paths[zig]}" \
+    "${paths[go]}" "${paths[cargo]}" "${paths[fnm]}" \
+    "${paths[bun]}/bin"; \
+  do
     PATH="$PATH:$newpath"
   done
+
+ # export BUN_INSTALL="${paths[bun]}"
 
   # history
   export HISTCONTROL=ignoredups:erasedups
@@ -978,12 +1000,19 @@ main() {
   has feh         &&  alias slideshow='feh -rzsZFD 5'
 
   # fnm
-  has fnm && eval "$(fnm env)" 
+  if [[ -d "${paths[fnm]}" ]]; then
+    eval "$(fnm env)"
+  fi
 
   # cargo
-  if [[ -f "$CARGOPATH"/env ]]; then
+  if [[ -f "${paths[cargo]}"/env ]]; then
     # shellcheck source=/dev/null
-    source "$CARGOPATH"/env
+    source "${paths[cargo]}"/env
+  fi
+
+  # starship
+  if has "starship"; then
+    eval "$(starship init bash)"
   fi
 
   return 0
